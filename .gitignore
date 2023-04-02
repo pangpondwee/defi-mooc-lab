@@ -8,3 +8,5 @@ artifacts
 .vscode
 
 profit.txt
+
+.DS_Store
