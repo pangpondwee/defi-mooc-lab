@@ -132,23 +132,21 @@ interface IUniswapV2Pair {
 
 // ----------------------IMPLEMENTATION------------------------------
 
-contract LiquidationOperator is IUniswapV2Callee {
+contract LiquidationOperator3 is IUniswapV2Callee {
     uint8 public constant health_factor_decimals = 18;
 
     // TODO: define constants used in the contract including ERC-20 tokens, Uniswap Pairs, Aave lending pools, etc. */
     
-    IERC20 constant WBTC = IERC20(0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599);
     IWETH constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    IERC20 constant USDT = IERC20(0xdAC17F958D2ee523a2206206994597C13D831ec7);
+    IERC20 constant USDC = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
 
     IUniswapV2Factory constant uniswapV2Factory = IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
-    IUniswapV2Pair immutable uniswapV2Pair_WBTC_USDT; // Pool1
-    IUniswapV2Pair immutable uniswapV2Pair_WBTC_WETH; // Pool2
+    IUniswapV2Pair immutable uniswapV2Pair_WETH_USDC; // Pool1
 
     ILendingPool constant lendingPool = ILendingPool(0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9);
 
-    address constant liquidationTarget = 0x59CE4a2AC5bC3f5F225439B2993b86B42f6d3e9F; // account ที่จะ liquidate
-    uint debt_USDT;
+    address constant liquidationTarget = 0x63f6037d3e9d51ad865056BF7792029803b6eEfD;
+    uint debt_USDC;
 
     // END TODO
 
@@ -170,15 +168,15 @@ contract LiquidationOperator is IUniswapV2Callee {
         uint256 numerator = amountInWithFee * reserveOut;
         uint256 denominator = reserveIn * 1000 + amountInWithFee;
         amountOut = numerator / denominator;
-    } // amountIn คือ จำนวนเหรียญที่จะใส่เข้าไปเพื่อนำอีกเหรียญออกมา
+    }
 
     // some helper function, it is totally fine if you can finish the lab without using these function
     // given an output amount of an asset and pair reserves, returns a required input amount of the other asset
     // safe mul is not necessary since https://docs.soliditylang.org/en/v0.8.9/080-breaking-changes.html
     function getAmountIn(
-        uint256 amountOut, // จำนวนเหรียญ USDT ที่ flash loan ไปในตอนแรก
-        uint256 reserveIn, // จำนวนเหรียญ WBTC ทั้งหมดใน pool
-        uint256 reserveOut // จำนวนเหรียญ USDT ทั้งหมดใน pool
+        uint256 amountOut,
+        uint256 reserveIn,
+        uint256 reserveOut
     ) internal pure returns (uint256 amountIn) {
         require(amountOut > 0, "UniswapV2Library: INSUFFICIENT_OUTPUT_AMOUNT");
         require(
@@ -193,11 +191,9 @@ contract LiquidationOperator is IUniswapV2Callee {
     constructor() {
         // TODO: (optional) initialize your contract
 
-        uniswapV2Pair_WBTC_USDT = IUniswapV2Pair(uniswapV2Factory.getPair(address(WBTC), address(USDT))); // Pool1
-        uniswapV2Pair_WBTC_WETH = IUniswapV2Pair(uniswapV2Factory.getPair(address(WBTC), address(WETH))); // Pool2
-        // debt_USDT = 2000000000; // 2000.000000 (จำนวนเหรียญ USDT ที่จะทำ flash loan)
-        // debt_USDT = 5000000000; // 5000.000000
-        debt_USDT = 10000000000; // 10000.000000
+        uniswapV2Pair_WETH_USDC = IUniswapV2Pair(uniswapV2Factory.getPair(address(WETH), address(USDC))); // Pool1
+        debt_USDC = 8128956343; // 8,128.956343 จากใน etherscan
+        
         // END TODO
     }
 
@@ -239,7 +235,7 @@ contract LiquidationOperator is IUniswapV2Callee {
         // we should borrow USDT, liquidate the target user and get the WBTC, then swap WBTC to repay uniswap
         // (please feel free to develop other workflows as long as they liquidate the target user successfully)
 
-        uniswapV2Pair_WBTC_USDT.swap(0, debt_USDT, address(this), "$"); // $ คือการทำ flash loan บรรทัดนี้คือกู้ flash loan ออกมา
+        uniswapV2Pair_WETH_USDC.swap(debt_USDC, 0, address(this), "$"); // ทำ flash loan
 
         // 3. Convert the profit into ETH and send back to sender
 
@@ -253,55 +249,37 @@ contract LiquidationOperator is IUniswapV2Callee {
     // required by the swap
     function uniswapV2Call(
         address,
-        uint256,
         uint256 amount1,
+        uint256,
         bytes calldata
     ) external override {
         // TODO: implement your liquidation logic
 
         // 2.0. security checks and initializing variables
         
-        assert(msg.sender == address(uniswapV2Pair_WBTC_USDT));
-        (uint256 reserve_WBTC_Pool1, uint256 reserve_USDT_Pool1, ) = uniswapV2Pair_WBTC_USDT.getReserves(); // Pool1
-        (uint256 reserve_WBTC_Pool2, uint256 reserve_WETH_Pool2, ) = uniswapV2Pair_WBTC_WETH.getReserves(); // Pool2
+        assert(msg.sender == address(uniswapV2Pair_WETH_USDC));
+        (uint256 reserve_USDC_Pool1, uint256 reserve_WETH_Pool1, ) = uniswapV2Pair_WETH_USDC.getReserves(); // pool1
 
-        console.log("---Liquidation 2000 USDT---");
-        console.log("uniswapV2Pair(%s): WBTC <> USDT", address(uniswapV2Pair_WBTC_USDT)); // แสดง address ของ pool
-        console.log("reserve WBTC: %s", reserve_WBTC_Pool1);
-        console.log("reserve USDT: %s", reserve_USDT_Pool1);
-        console.log("---------------------------");
-
-        console.log("uniswapV2Pair(%s): WBTC <> WETH", address(uniswapV2Pair_WBTC_WETH));
-        console.log("reserve WBTC: %s", reserve_WBTC_Pool2);
-        console.log("reserve WETH: %s", reserve_WETH_Pool2);
-        console.log("---------------------------");
+        console.log("uniswapV2Pair(%s): WETH <> USDC", address(uniswapV2Pair_WETH_USDC));
+        console.log("reserve WETH: %s", reserve_WETH_Pool1); // แสดงจำนวน WETH ใน pool1
+        console.log("reserve USDC: %s", reserve_USDC_Pool1); // แสดงจำนวน USDC ใน pool1
 
         // 2.1 liquidate target user
-
+        
         console.log("---liquidate target user---");
-        console.log("Flash Loan USDT: ", USDT.balanceOf(address(this))); // เช็คว่ากู้แล้วได้เงินมาจริงๆ
-        uint debtToCover = amount1; // จำนวน USDT ที่จะเอาไป liquidate
-        USDT.approve(address(lendingPool), debtToCover); // ให้สิทธิ์ AAVE ในการดึงเงิน
-        lendingPool.liquidationCall(address(WBTC), address(USDT), liquidationTarget, debtToCover, false); // ทำ liquidation
-        console.log("Collateral WBTC: ", WBTC.balanceOf(address(this))); // ดูว่าได้ WBTC มาเท่าไหร่
+        console.log("Flash Loan USDC: %s", USDC.balanceOf(address(this))); // แสดง USDC จาก flash loan
+        uint debtToCover = amount1; // จำนวน USDC ที่จะนำไป liquidate
+        USDC.approve(address(lendingPool), debtToCover);
+        lendingPool.liquidationCall(address(WETH), address(USDC), liquidationTarget, debtToCover, false); // ทำ liquidation
+        console.log("Collateral WETH: %s", WETH.balanceOf(address(this))); // แสดง WETH ที่ได้จากการทำ liquidation
         console.log("---------------------------");
 
-        // 2.2 repay USDT ที่กู้มา
+        // 2.2 repay
 
-        console.log("---repay flash loan USDT---");
-        uint repay_WBTC = getAmountIn(debtToCover, reserve_WBTC_Pool1, reserve_USDT_Pool1); // ใช้ getAmountIn เพื่อที่จะได้รู้ว่าต้องคืนเท่าไหร่ debtToCover คือ USDT ที่กู้ออกมา
-        console.log("WBTC to repay: ", repay_WBTC); // WBTC ที่ต้องจ่ายคืน
-        WBTC.transfer(address(uniswapV2Pair_WBTC_USDT), repay_WBTC); // เอา WBTC ไปคืนที่เรากู้ USDT มา
-
-        // 2.3 Swap WBTC for WETH เพื่อวัดผลกำไรเป็น WETH
-        
-        console.log("----swap WBTC for WETH-----");
-        uint256 swap_WBTC_to_WETH = WBTC.balanceOf(address(this)); // check WBTC ที่เหลืออยู่
-        console.log("WBTC remain: ", swap_WBTC_to_WETH);
-        WBTC.transfer(address(uniswapV2Pair_WBTC_WETH), swap_WBTC_to_WETH); // โอน WBTC เข้า WBTC and WETH pool เพื่อให้เค้าเห็นว่าเรามีเหรียญนี้จริงๆ
-        uint256 amountOut_WETH = getAmountOut(swap_WBTC_to_WETH, reserve_WBTC_Pool2, reserve_WETH_Pool2); // คำนวณว่าจะได้ WETH เท่าไหร่
-        uniswapV2Pair_WBTC_WETH.swap(0, amountOut_WETH, address(this), ""); // ทำการ swap, "" คือบอกว่าไม่ใช่ flash loan
-        // console.log("After Swap WETH: ", WETH.balanceOf(address(this))); // เช็คว่าได้ WETH เท่าไหร่ ซึ่งจะเป็นกำไร
+        uint repay_WETH = getAmountIn(debtToCover, reserve_WETH_Pool1, reserve_USDC_Pool1); // คำนวณ WETH ที่ต้องใส่นำไปคืน
+        console.log("repay WETH: %s", repay_WETH); // แสดงจำนวน WETH ที่ต้องจ่ายคืน
+        WETH.transfer(address(uniswapV2Pair_WETH_USDC), repay_WETH); // โอน WETH เข้า pool
+        // console.log("After Repayment, WETH: %s", WETH.balanceOf(address(this))); // แสดงจำนวน WETH ที่เหลือ
 
         // END TODO
     }
